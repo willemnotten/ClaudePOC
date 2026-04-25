@@ -1,0 +1,1451 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#080c07">
+<title>GridWalker</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/h3-js/4.1.0/h3-js.umd.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
+
+  *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+  :root {
+    --g:      #39ff6e;
+    --g2:     #00e5a0;
+    --gdim:   rgba(57,255,110,0.18);
+    --gfaint: rgba(57,255,110,0.07);
+    --red:    #ff3b3b;
+    --amber:  #ffb800;
+    --blue:   #3b8fff;
+    --purple: #b03bff;
+    --bg:     #080c07;
+    --panel:  rgba(5,10,5,0.92);
+    --text:   #a8f0bc;
+    --dim:    rgba(168,240,188,0.4);
+    --border: rgba(57,255,110,0.2);
+    --font:   'Share Tech Mono', monospace;
+    --head:   'Orbitron', monospace;
+  }
+
+  html, body { width:100%; height:100%; overflow:hidden; background:var(--bg); font-family:var(--font); color:var(--text); }
+
+  /* ── SCREENS ── */
+  .screen { position:fixed; inset:0; z-index:10; display:flex; align-items:center; justify-content:center; flex-direction:column; background:var(--bg); transition:opacity .4s; }
+  .screen.hidden { opacity:0; pointer-events:none; }
+
+  /* ── LOBBY ── */
+  #screen-lobby { gap:0; overflow-y:auto; padding:24px 16px; }
+  .lobby-inner { width:100%; max-width:480px; display:flex; flex-direction:column; gap:16px; }
+
+  .logo { font-family:var(--head); font-size:clamp(28px,8vw,52px); font-weight:900; color:var(--g); letter-spacing:.12em; text-shadow:0 0 32px rgba(57,255,110,.5), 0 0 80px rgba(57,255,110,.2); text-align:center; line-height:1; }
+  .logo sub { font-size:.32em; letter-spacing:.3em; color:var(--dim); display:block; margin-top:4px; }
+
+  .panel { background:var(--panel); border:1px solid var(--border); padding:16px; backdrop-filter:blur(8px); }
+  .panel-title { font-family:var(--head); font-size:10px; letter-spacing:.2em; color:var(--dim); margin-bottom:12px; }
+
+  .field { display:flex; flex-direction:column; gap:4px; margin-bottom:10px; }
+  .field label { font-size:10px; letter-spacing:.1em; color:var(--dim); }
+  .field input, .field select {
+    background:rgba(0,0,0,.4); border:1px solid var(--border); color:var(--g);
+    font-family:var(--font); font-size:13px; padding:8px 10px; width:100%;
+    outline:none; transition:border-color .2s;
+  }
+  .field input:focus, .field select:focus { border-color:var(--g); }
+  .field select option { background:#0a1409; }
+
+  .teams-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .team-slot { background:rgba(0,0,0,.3); border:1px solid var(--border); padding:10px; display:flex; flex-direction:column; gap:6px; }
+  .team-slot label { font-size:9px; letter-spacing:.1em; color:var(--dim); }
+  .team-slot input[type=text] { background:transparent; border:none; border-bottom:1px solid var(--border); color:var(--g); font-family:var(--font); font-size:12px; padding:2px 0; width:100%; outline:none; }
+  .color-row { display:flex; align-items:center; gap:8px; }
+  .color-row input[type=color] { width:28px; height:20px; border:1px solid var(--border); background:none; cursor:pointer; padding:1px; }
+
+  .btn { font-family:var(--head); font-size:11px; letter-spacing:.15em; text-transform:uppercase; padding:12px 24px; border:1.5px solid var(--g); background:transparent; color:var(--g); cursor:pointer; clip-path:polygon(8px 0%,100% 0%,calc(100% - 8px) 100%,0% 100%); transition:all .15s; width:100%; }
+  .btn:hover { background:rgba(57,255,110,.1); }
+  .btn.primary { background:var(--g); color:#000; font-weight:700; }
+  .btn.primary:hover { background:#50ff8a; }
+  .btn.danger { border-color:var(--red); color:var(--red); }
+  .btn.danger:hover { background:rgba(255,59,59,.1); }
+  .btn.amber { border-color:var(--amber); color:var(--amber); }
+  .btn.amber:hover { background:rgba(255,184,0,.1); }
+  .btn:disabled { opacity:.35; cursor:not-allowed; }
+
+  /* ── MAP SCREEN ── */
+  #screen-game { z-index:1; }
+  #map { position:fixed; inset:0; z-index:0; background:var(--bg); }
+  .leaflet-tile-pane { filter:saturate(.35) brightness(.65) contrast(1.1); }
+  .leaflet-control-attribution { background:rgba(0,0,0,.5)!important; color:var(--dim)!important; font-family:var(--font)!important; font-size:8px!important; }
+
+  #grid-canvas { position:fixed; top:0; left:0; pointer-events:none; z-index:400; }
+
+  /* ── HUD ── */
+  #hud { position:fixed; inset:0; z-index:800; pointer-events:none;
+    background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,.03) 3px,rgba(0,0,0,.03) 4px); }
+
+  /* top bar */
+  #hud-top { position:absolute; top:0; left:0; right:0; padding:max(env(safe-area-inset-top),12px) 12px 0;
+    display:flex; justify-content:space-between; align-items:flex-start; gap:8px;
+    background:linear-gradient(to bottom,rgba(0,0,0,.7) 0%,transparent 100%); }
+
+  #timer-box { font-family:var(--head); font-size:clamp(22px,6vw,36px); font-weight:700; color:var(--g);
+    text-shadow:0 0 20px rgba(57,255,110,.6); letter-spacing:.1em; line-height:1; text-align:center; }
+  #timer-box small { font-size:9px; letter-spacing:.2em; color:var(--dim); display:block; }
+  #timer-box.urgent { color:var(--red); text-shadow:0 0 20px rgba(255,59,59,.7); animation:pulse .5s infinite alternate; }
+
+  @keyframes pulse { from{opacity:1} to{opacity:.6} }
+
+  #score-board { background:var(--panel); border:1px solid var(--border); padding:8px 10px; min-width:130px; backdrop-filter:blur(6px); }
+  .score-row { display:flex; align-items:center; gap:6px; font-size:10px; line-height:1.8; }
+  .score-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .score-name { color:var(--dim); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .score-val { color:var(--g); font-size:11px; }
+  .score-blind { color:var(--dim); font-size:10px; }
+
+  /* bottom bar */
+  #hud-bottom { position:absolute; bottom:0; left:0; right:0;
+    padding:12px 12px max(env(safe-area-inset-bottom),16px);
+    display:flex; flex-direction:column; align-items:center; gap:8px;
+    background:linear-gradient(to top,rgba(0,0,0,.75) 0%,transparent 100%); }
+
+  #powerup-bar { display:flex; gap:6px; flex-wrap:wrap; justify-content:center; pointer-events:auto; }
+  .pu-btn { background:var(--panel); border:1px solid var(--border); color:var(--text); font-family:var(--font); font-size:9px;
+    letter-spacing:.07em; padding:5px 9px; cursor:pointer; display:flex; align-items:center; gap:4px;
+    transition:all .15s; clip-path:polygon(5px 0%,100% 0%,calc(100% - 5px) 100%,0% 100%); }
+  .pu-btn:hover { border-color:var(--g); color:var(--g); background:var(--gdim); }
+  .pu-btn .pu-count { font-family:var(--head); font-size:8px; color:var(--amber); }
+  .pu-btn:disabled { opacity:.3; cursor:not-allowed; }
+
+  #action-row { display:flex; gap:8px; pointer-events:auto; }
+
+  #streak-display { font-family:var(--head); font-size:11px; letter-spacing:.1em; color:var(--amber);
+    display:flex; align-items:center; gap:4px; }
+  #streak-display.hidden { opacity:0; }
+
+  #status-bar { font-size:10px; letter-spacing:.07em; color:var(--dim); text-align:center; min-height:14px; pointer-events:none; }
+
+  /* ── MISSION MODAL ── */
+  #mission-modal { position:fixed; inset:0; z-index:900; display:flex; align-items:flex-end; justify-content:center;
+    background:rgba(0,0,0,.7); backdrop-filter:blur(4px); transition:opacity .3s; }
+  #mission-modal.hidden { opacity:0; pointer-events:none; }
+  #mission-box { background:var(--bg); border:1px solid var(--border); border-bottom:none; width:100%; max-width:560px;
+    padding:20px 16px max(env(safe-area-inset-bottom),20px); position:relative; max-height:85vh; overflow-y:auto; }
+  .mission-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+  .mission-type { font-family:var(--head); font-size:9px; letter-spacing:.2em; color:var(--dim); }
+  .mission-pts { font-family:var(--head); font-size:11px; color:var(--amber); letter-spacing:.1em; }
+  .mission-timer-bar { height:3px; background:rgba(57,255,110,.15); margin-bottom:14px; position:relative; }
+  .mission-timer-fill { height:100%; background:var(--g); transition:width .5s linear; }
+  .mission-q { font-size:14px; line-height:1.6; color:var(--text); margin-bottom:14px; }
+  .mission-hint { font-size:10px; color:var(--dim); letter-spacing:.06em; margin-bottom:14px; border-left:2px solid var(--border); padding-left:8px; }
+  .options-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px; }
+  .opt-btn { background:rgba(0,0,0,.4); border:1px solid var(--border); color:var(--text); font-family:var(--font); font-size:12px;
+    padding:10px 8px; cursor:pointer; text-align:left; transition:all .15s; line-height:1.4; }
+  .opt-btn:hover { border-color:var(--g); color:var(--g); background:var(--gfaint); }
+  .opt-btn.correct { border-color:var(--g); background:rgba(57,255,110,.2); color:var(--g); }
+  .opt-btn.wrong   { border-color:var(--red); background:rgba(255,59,59,.15); color:var(--red); }
+
+  .estimation-wrap { display:flex; gap:8px; margin-bottom:12px; }
+  .estimation-wrap input { flex:1; background:rgba(0,0,0,.4); border:1px solid var(--border); color:var(--g);
+    font-family:var(--font); font-size:16px; padding:10px; outline:none; text-align:center; }
+  .estimation-wrap input:focus { border-color:var(--g); }
+
+  .consensus-grid { display:flex; flex-direction:column; gap:6px; margin-bottom:12px; }
+  .member-vote { display:flex; align-items:center; gap:8px; }
+  .member-name { font-size:11px; color:var(--dim); width:80px; }
+  .vote-btns { display:flex; gap:6px; }
+  .vote-btn { background:transparent; border:1px solid var(--border); color:var(--dim); font-family:var(--font); font-size:10px; padding:4px 10px; cursor:pointer; transition:all .15s; }
+  .vote-btn.voted-yes { border-color:var(--g); color:var(--g); background:var(--gfaint); }
+  .vote-btn.voted-no { border-color:var(--red); color:var(--red); background:rgba(255,59,59,.08); }
+
+  .fun-fact { font-size:11px; color:var(--dim); line-height:1.5; margin-top:8px; border-top:1px solid var(--border); padding-top:10px; font-style:italic; }
+
+  /* ── HINT PANEL ── */
+  #hint-panel { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:910;
+    background:var(--bg); border:1px solid var(--border); padding:20px; max-width:340px; width:90%;
+    display:none; }
+  #hint-panel.show { display:block; }
+  .hint-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:4px; margin:12px 0; }
+  .hint-frag { aspect-ratio:1; border:1px solid var(--border); background:rgba(57,255,110,.05);
+    display:flex; align-items:center; justify-content:center; font-size:20px; position:relative; overflow:hidden; transition:all .3s; }
+  .hint-frag.unlocked { border-color:var(--g); background:rgba(57,255,110,.12); }
+  .hint-frag.locked { filter:brightness(.3); }
+  .hint-frag .frag-label { font-family:var(--head); font-size:8px; color:var(--dim); position:absolute; bottom:2px; right:3px; }
+
+  /* ── CENTRAL CHALLENGE ── */
+  #central-modal { position:fixed; inset:0; z-index:920; background:rgba(0,0,0,.85); backdrop-filter:blur(8px);
+    display:flex; align-items:center; justify-content:center; padding:16px; transition:opacity .3s; }
+  #central-modal.hidden { opacity:0; pointer-events:none; }
+  #central-box { background:var(--bg); border:1px solid rgba(255,184,0,.4); max-width:500px; width:100%; padding:24px; max-height:90vh; overflow-y:auto; }
+  .challenge-title { font-family:var(--head); font-size:14px; letter-spacing:.15em; color:var(--amber); margin-bottom:4px; }
+  .challenge-sub { font-size:10px; color:var(--dim); letter-spacing:.1em; margin-bottom:16px; }
+  .layer-indicator { display:flex; gap:8px; margin-bottom:20px; }
+  .layer-dot { width:28px; height:4px; background:var(--border); flex:1; transition:background .3s; }
+  .layer-dot.done { background:var(--g); }
+  .layer-dot.active { background:var(--amber); animation:pulse .6s infinite alternate; }
+
+  /* ── POWER-UP MODAL ── */
+  #pu-modal { position:fixed; inset:0; z-index:905; background:rgba(0,0,0,.8); backdrop-filter:blur(4px);
+    display:flex; align-items:center; justify-content:center; padding:16px; transition:opacity .3s; }
+  #pu-modal.hidden { opacity:0; pointer-events:none; }
+  #pu-box { background:var(--bg); border:1px solid var(--purple); max-width:400px; width:100%; padding:20px; }
+  .pu-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:12px 0; }
+  .pu-card { background:rgba(0,0,0,.4); border:1px solid var(--border); padding:10px; cursor:pointer; transition:all .15s; }
+  .pu-card:hover { border-color:var(--purple); background:rgba(176,59,255,.08); }
+  .pu-card .pu-icon { font-size:22px; margin-bottom:4px; }
+  .pu-card .pu-name { font-family:var(--head); font-size:9px; letter-spacing:.1em; color:var(--purple); }
+  .pu-card .pu-desc { font-size:9px; color:var(--dim); margin-top:3px; line-height:1.4; }
+  .pu-card.used { opacity:.3; cursor:not-allowed; }
+
+  /* ── RESULTS SCREEN ── */
+  #screen-results { z-index:20; padding:24px 16px; overflow-y:auto; }
+  .results-inner { width:100%; max-width:500px; }
+  .results-title { font-family:var(--head); font-size:clamp(20px,6vw,36px); font-weight:900; color:var(--g);
+    text-align:center; letter-spacing:.12em; margin-bottom:4px; }
+  .results-sub { font-size:10px; color:var(--dim); text-align:center; letter-spacing:.15em; margin-bottom:24px; }
+  .podium { display:flex; align-items:flex-end; justify-content:center; gap:8px; margin-bottom:24px; height:140px; }
+  .podium-slot { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; gap:4px; }
+  .podium-bar { width:100%; background:var(--gdim); border-top:3px solid var(--g); display:flex; align-items:center; justify-content:center; }
+  .podium-rank { font-family:var(--head); font-size:9px; color:var(--dim); letter-spacing:.1em; }
+  .podium-name { font-size:10px; color:var(--text); text-align:center; }
+  .podium-score { font-family:var(--head); font-size:12px; color:var(--g); }
+  .result-row { display:flex; align-items:center; gap:10px; padding:10px; border-bottom:1px solid var(--border); font-size:11px; }
+  .result-rank { font-family:var(--head); font-size:16px; color:var(--dim); width:28px; }
+  .result-name { flex:1; color:var(--text); }
+  .result-stats { display:flex; flex-direction:column; align-items:flex-end; gap:2px; }
+  .result-pts { font-family:var(--head); font-size:14px; color:var(--g); }
+  .result-detail { font-size:9px; color:var(--dim); }
+
+  /* ── TOASTS ── */
+  #toast-container { position:fixed; top:100px; left:50%; transform:translateX(-50%); z-index:950; display:flex; flex-direction:column; gap:6px; pointer-events:none; }
+  .toast { background:var(--panel); border:1px solid var(--border); padding:8px 16px; font-size:11px; letter-spacing:.07em;
+    animation:toastIn .3s ease forwards; white-space:nowrap; }
+  .toast.success { border-color:var(--g); color:var(--g); }
+  .toast.error   { border-color:var(--red); color:var(--red); }
+  .toast.amber   { border-color:var(--amber); color:var(--amber); }
+  .toast.purple  { border-color:var(--purple); color:var(--purple); }
+  @keyframes toastIn { from{opacity:0;transform:translateY(-10px)} to{opacity:1;transform:translateY(0)} }
+
+  /* ── FOG FLASH ── */
+  #fog-flash { position:fixed; inset:0; z-index:850; background:rgba(57,255,110,.12); pointer-events:none; opacity:0; transition:opacity .15s; }
+  #fog-flash.flash { opacity:1; }
+
+  /* scrollbar */
+  ::-webkit-scrollbar { width:4px; }
+  ::-webkit-scrollbar-track { background:transparent; }
+  ::-webkit-scrollbar-thumb { background:var(--border); }
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<!-- LOBBY SCREEN -->
+<!-- ══════════════════════════════════════════════════════ -->
+<div id="screen-lobby" class="screen">
+  <div class="lobby-inner">
+    <div class="logo">GRIDWALKER<sub>STAD &amp; GEBIED ONTDEKKINGSSPEL</sub></div>
+
+    <div class="panel">
+      <div class="panel-title">// SESSIE INSTELLINGEN</div>
+      <div class="field"><label>LOCATIE (STAD / GEBIED)</label>
+        <input type="text" id="cfg-city" value="Rotterdam Centrum" placeholder="bijv. Amsterdam Jordaan">
+      </div>
+      <div class="field"><label>SPELDUUR (MINUTEN)</label>
+        <select id="cfg-duration">
+          <option value="30">30 min — Snel potje</option>
+          <option value="60">60 min — Standaard</option>
+          <option value="90" selected>90 min — Volledig spel</option>
+        </select>
+      </div>
+      <div class="field"><label>SPEELSTRAAL</label>
+        <select id="cfg-radius">
+          <option value="200">200 m — Compacte buurt</option>
+          <option value="300" selected>300 m — Stadscentrum</option>
+          <option value="500">500 m — Ruim gebied</option>
+        </select>
+      </div>
+      <div class="field"><label>SCORE-BLINDHEID EINDE (MINUTEN VOOR)</label>
+        <select id="cfg-blind">
+          <option value="10">10 minuten</option>
+          <option value="15" selected>15 minuten</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">// TEAMS — 2 TOT 4</div>
+      <div class="teams-grid" id="teams-grid"></div>
+    </div>
+
+    <button class="btn primary" id="btn-launch">▶ START SPELWERELD</button>
+    <div style="font-size:9px;color:var(--dim);text-align:center;letter-spacing:.08em">DEMO — ALLE DATA GESIMULEERD</div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<!-- GAME SCREEN -->
+<!-- ══════════════════════════════════════════════════════ -->
+<div id="screen-game" class="screen hidden">
+  <div id="map"></div>
+  <canvas id="grid-canvas"></canvas>
+
+  <div id="hud">
+    <div id="hud-top">
+      <div id="timer-box">
+        <small>TIJD OVER</small>
+        <span id="timer-display">90:00</span>
+      </div>
+      <div id="score-board"></div>
+    </div>
+
+    <div id="hud-bottom">
+      <div id="streak-display" class="hidden">🔥 <span id="streak-count">0</span>× STREAK</div>
+      <div id="powerup-bar"></div>
+      <div id="action-row">
+        <button class="btn amber" id="btn-hints" style="font-size:10px;padding:8px 14px;">🧩 FRAGMENTEN (<span id="hint-count">0</span>)</button>
+        <button class="btn" id="btn-claim" style="font-size:10px;padding:8px 14px;">📍 CLAIM HEX</button>
+        <button class="btn" id="btn-central" style="font-size:10px;padding:8px 14px;display:none;">⚡ CENTRALE UITDAGING</button>
+      </div>
+      <div id="status-bar">Verken het gebied — loop naar een hexagon om het te claimen</div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<!-- MISSION MODAL -->
+<!-- ══════════════════════════════════════════════════════ -->
+<div id="mission-modal" class="hidden">
+  <div id="mission-box">
+    <div class="mission-header">
+      <span class="mission-type" id="mtype">MEERKEUZE</span>
+      <span class="mission-pts" id="mpts">+150 PTS</span>
+    </div>
+    <div class="mission-timer-bar"><div class="mission-timer-fill" id="mtimer-fill" style="width:100%"></div></div>
+    <div class="mission-q" id="mquestion"></div>
+    <div class="mission-hint" id="mhint" style="display:none"></div>
+    <div id="mission-answer-area"></div>
+    <button class="btn primary" id="btn-submit-mission" style="display:none">BEVESTIG ANTWOORD</button>
+    <div class="fun-fact" id="fun-fact" style="display:none"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<!-- HINT PANEL -->
+<!-- ══════════════════════════════════════════════════════ -->
+<div id="hint-panel">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <span style="font-family:var(--head);font-size:10px;letter-spacing:.15em;color:var(--amber)">// HINT FRAGMENTEN</span>
+    <button onclick="document.getElementById('hint-panel').classList.remove('show')" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:16px">×</button>
+  </div>
+  <div style="font-size:10px;color:var(--dim);margin-bottom:8px">Verzamel fragmenten via sleutelhexagons om de centrale uitdaging te ontgrendelen.</div>
+  <div class="hint-grid" id="hint-grid"></div>
+  <div id="hint-progress" style="font-size:10px;color:var(--dim);text-align:center"></div>
+  <button class="btn primary" id="btn-start-central" style="margin-top:12px;display:none">⚡ START CENTRALE UITDAGING</button>
+</div>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<!-- CENTRAL CHALLENGE MODAL -->
+<!-- ══════════════════════════════════════════════════════ -->
+<div id="central-modal" class="hidden">
+  <div id="central-box">
+    <div class="challenge-title">⚡ CENTRALE UITDAGING</div>
+    <div class="challenge-sub" id="central-sub">HET HART VAN HET SPEL</div>
+    <div class="layer-indicator">
+      <div class="layer-dot active" id="ldot0"></div>
+      <div class="layer-dot" id="ldot1"></div>
+      <div class="layer-dot" id="ldot2"></div>
+    </div>
+    <div id="central-content"></div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn" id="btn-central-close" style="flex:1;font-size:10px">ANNULEER</button>
+      <button class="btn primary" id="btn-central-submit" style="flex:2">BEVESTIG</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<!-- POWER-UP MODAL -->
+<!-- ══════════════════════════════════════════════════════ -->
+<div id="pu-modal" class="hidden">
+  <div id="pu-box">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <span style="font-family:var(--head);font-size:11px;letter-spacing:.15em;color:var(--purple)">// POWER-UPS INZETTEN</span>
+      <button onclick="closePUModal()" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:18px">×</button>
+    </div>
+    <div id="pu-grid" class="pu-grid"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<!-- RESULTS SCREEN -->
+<!-- ══════════════════════════════════════════════════════ -->
+<div id="screen-results" class="screen hidden">
+  <div class="results-inner">
+    <div class="results-title">EINDUITSLAG</div>
+    <div class="results-sub" id="result-city"></div>
+    <div class="podium" id="podium"></div>
+    <div id="results-list"></div>
+    <button class="btn primary" id="btn-replay" style="margin-top:20px;width:100%">▶ NIEUW SPEL</button>
+  </div>
+</div>
+
+<!-- Shared overlays -->
+<div id="toast-container"></div>
+<div id="fog-flash"></div>
+
+<script>
+// ════════════════════════════════════════════════════════
+// MISSION DATA — simulated location-based questions
+// ════════════════════════════════════════════════════════
+const MISSION_BANK = {
+  multiple_choice: [
+    { question:"In welk jaar werd de Euromast in Rotterdam gebouwd?", options:["1949","1960","1972","1985"], correct:1, hint:"Kijk omhoog — het antwoord staat bijna letterlijk in het silhouet.", fun_fact:"De Euromast werd gebouwd voor de Floriade en is 185 meter hoog.", difficulty:1 },
+    { question:"Wat is de diepte van de Maastunnel onder de rivierbedding?", options:["18m","22m","29m","35m"], correct:2, hint:"Dieper dan je denkt — de tunnel is een ingenieurswonder uit 1942.", fun_fact:"De Maastunnel was de eerste geboorde tunnel onder een rivier in Nederland.", difficulty:2 },
+    { question:"Welk gebouw staat bekend als 'De Potloden' in Rotterdam?", options:["Blaak Torens","Erasmus MC","Witte Huis","Montevideo"], correct:0, hint:"Ze staan vlakbij het Blaak-station.", fun_fact:"De twee torens van Piet Blom zijn eigenlijk kantelpunten boven een plint.", difficulty:1 },
+    { question:"Hoe heet de architect van de Markthal in Rotterdam?", options:["Rem Koolhaas","Neutelings Riedijk","MVRDV","Benthem Crouwel"], correct:2, hint:"Het bureau achter de Markthal is bekend om kleurrijke, speelse gebouwen.", fun_fact:"De Markthal opende in 2014 en bevat 228 appartementen in de schil.", difficulty:2 },
+    { question:"Welke brug is de grootste hangbrug van Europa?", options:["Van Brienenoordbrug","Erasmusbrug","Moerdijkbrug","Beneluxtunnel"], correct:1, hint:"Ze noemen hem ook wel 'De Zwaan'.", fun_fact:"De Erasmusbrug werd ontworpen door Ben van Berkel en opende in 1996.", difficulty:1 },
+    { question:"Hoeveel mensen overleefden het bombardement op Rotterdam in 1940?", options:["Het centrum werd volledig verwoest — niemand","800 doden","30.000 doden","900 doden"], correct:3, hint:"Het was een traumatische dag voor de stad.", fun_fact:"Het bombardement verwoestte 257 hectare van het stadscentrum op 14 mei 1940.", difficulty:3 },
+  ],
+  estimation: [
+    { question:"Hoeveel meter hoog is de Euromast (incl. mast)?", answer:185, margin:15, hint:"Denk aan een klassiek wolkenkrabber-getal.", fun_fact:"Met de Spido-mast erbij is de Euromast 185 meter — lager dan de Eiffeltoren.", difficulty:1 },
+    { question:"In welk jaar opende de Rotterdamse haven voor het eerst officieel?", answer:1340, margin:20, hint:"Het is oud — middeleeuwse tijden.", fun_fact:"In 1340 kreeg Rotterdam stadsrechten en daarmee ook officieel de haven.", difficulty:3 },
+    { question:"Hoeveel kubieke meter beton zit er in de Erasmusbrug?", answer:22000, margin:5000, hint:"Denk aan duizenden vrachtwagens vol beton.", fun_fact:"De Erasmusbrug is 802 meter lang en gebruikte enorme hoeveelheden materiaal.", difficulty:2 },
+    { question:"Hoe lang is de lijn van de Hoekse Lijn metro in kilometers?", answer:21, margin:3, hint:"Van Rotterdam naar Hoek van Holland is een flinke rit.", fun_fact:"De Hoekse Lijn werd in 2017 omgebouwd van trein naar metrolijn.", difficulty:2 },
+  ],
+  consensus: [
+    { question:"Is de Markthal architectonisch een verbetering voor Rotterdam ten opzichte van de oude markt?", answer:"JA", hint:"Denk aan het functionele én esthetische argument.", fun_fact:"De Markthal won meerdere internationale architectuurprijzen.", difficulty:1 },
+    { question:"Zou de Erasmusbrug geschikt zijn als decor voor een actifilm?", answer:"JA", hint:"Hij staat al in diverse films en videoclips.", fun_fact:"De brug is gebruikt in de film 'The World Is Not Enough' van James Bond.", difficulty:1 },
+    { question:"Is Rotterdam een betere architectuurstad dan Amsterdam?", answer:"JA", hint:"Kijk om je heen — de skyline spreekt voor zich.", fun_fact:"Rotterdam heet niet voor niets 'Architectuurstad van Nederland'.", difficulty:2 },
+  ],
+};
+
+// ════════════════════════════════════════════════════════
+// GAME STATE
+// ════════════════════════════════════════════════════════
+const G = {
+  cfg: {},
+  teams: [],
+  playerTeam: 0,
+  hexes: new Map(),       // h3index → { teamId, isKey, isCentral, pointsValue, missionDone }
+  totalHexes: 0,
+  hints: [],              // array of {teamId, fragmentIndex}
+  playerPos: null,
+  centerLatLng: null,
+  simPos: null,
+  timerSec: 0,
+  timerInterval: null,
+  gameRunning: false,
+  centralUnlocked: false,
+  centralDone: false,
+  centralLayer: 0,
+  centralAnswers: [],
+  scoreBlind: false,
+  streaks: [],            // per team
+  activePowerUps: {},     // teamId → { type, expiresAt }
+  events: [],
+  map: null,
+  hexLayer: null,
+  playerMarker: null,
+  botIntervals: [],
+  missionTimerInterval: null,
+  currentMission: null,
+  currentHex: null,
+  missionTimeLeft: 0,
+  pendingAnswer: null,
+  resolution: 10,         // H3 resolution
+};
+
+// ════════════════════════════════════════════════════════
+// TEAM DEFAULTS
+// ════════════════════════════════════════════════════════
+const TEAM_DEFAULTS = [
+  { name:"ROOD",   color:"#ff3b3b" },
+  { name:"BLAUW",  color:"#3b8fff" },
+  { name:"GEEL",   color:"#ffb800" },
+  { name:"PAARS",  color:"#b03bff" },
+];
+
+const POWER_UP_DEFS = [
+  { type:"double_points",  icon:"✖️",  name:"DUBBELAAR",     desc:"Volgende missie: dubbele punten",       cat:"strategic" },
+  { type:"fog_bomb",       icon:"💨",  name:"FOG BOMB",       desc:"Tegenstander ziet kaart 60s niet",     cat:"offensive" },
+  { type:"lock",           icon:"🔒",  name:"VERGRENDEL",     desc:"Blokkeert 1 hex van tegenstander",     cat:"offensive" },
+  { type:"shield",         icon:"🛡️",  name:"SCHILD",         desc:"Beschermt jouw hex 5 min",             cat:"defensive" },
+  { type:"streak_saver",   icon:"🔥",  name:"STREAK SAVER",   desc:"Behoudt streak bij 1 fout",            cat:"defensive" },
+  { type:"scanner",        icon:"📡",  name:"SCANNER",        desc:"Onthult sleutelhexagons 30s",           cat:"strategic" },
+  { type:"score_peek",     icon:"👁️",  name:"SCORE PEEK",     desc:"Bekijk scores 60s, ook blind",         cat:"strategic" },
+  { type:"sabotage",       icon:"💀",  name:"SABOTAGE",       desc:"Tegenstander: volgende vraag moeilijkst",cat:"offensive"},
+  { type:"hint_steal",     icon:"🧩",  name:"HINT DIEF",      desc:"Steel 1 fragment van rijkste team",    cat:"offensive" },
+];
+
+// ════════════════════════════════════════════════════════
+// LOBBY SETUP
+// ════════════════════════════════════════════════════════
+function buildLobby() {
+  const grid = document.getElementById('teams-grid');
+  grid.innerHTML = '';
+  for (let i = 0; i < 4; i++) {
+    const d = TEAM_DEFAULTS[i];
+    grid.innerHTML += `
+      <div class="team-slot">
+        <label>TEAM ${i+1}${i===0?' (JOUW TEAM)':' (BOT)'}</label>
+        <input type="text" id="tname-${i}" value="${d.name}" maxlength="12">
+        <div class="color-row">
+          <span style="font-size:9px;color:var(--dim)">KLEUR</span>
+          <input type="color" id="tcolor-${i}" value="${d.color}">
+          ${i===0?'':`<select id="tactive-${i}" style="font-size:9px;font-family:var(--font);background:var(--bg);border:1px solid var(--border);color:var(--dim);padding:2px 4px">
+            <option value="1">Actief</option><option value="0">Uit</option></select>`}
+        </div>
+      </div>`;
+  }
+}
+
+document.getElementById('btn-launch').addEventListener('click', launchGame);
+document.getElementById('btn-replay').addEventListener('click', () => {
+  document.getElementById('screen-results').classList.add('hidden');
+  document.getElementById('screen-lobby').classList.remove('hidden');
+});
+
+// ════════════════════════════════════════════════════════
+// LAUNCH GAME
+// ════════════════════════════════════════════════════════
+async function launchGame() {
+  G.cfg = {
+    city:     document.getElementById('cfg-city').value || 'Rotterdam',
+    duration: parseInt(document.getElementById('cfg-duration').value),
+    radius:   parseInt(document.getElementById('cfg-radius').value),
+    blind:    parseInt(document.getElementById('cfg-blind').value),
+  };
+
+  G.teams = [];
+  for (let i = 0; i < 4; i++) {
+    const active = i === 0 ? true : document.getElementById(`tactive-${i}`)?.value !== '0';
+    if (!active) continue;
+    G.teams.push({
+      id: i,
+      name: document.getElementById(`tname-${i}`).value || `Team ${i+1}`,
+      color: document.getElementById(`tcolor-${i}`).value,
+      score: 0,
+      claims: 0,
+      isBot: i !== 0,
+      powerUps: [POWER_UP_DEFS[0], POWER_UP_DEFS[4]], // start with 2
+    });
+  }
+  if (G.teams.length < 2) { toast('Activeer minstens 2 teams','error'); return; }
+
+  G.playerTeam = 0;
+  G.streaks = G.teams.map(() => ({ current:0, max:0, multiplier:1 }));
+  G.hints = [];
+  G.events = [];
+  G.centralDone = false;
+  G.centralUnlocked = false;
+  G.centralLayer = 0;
+  G.activePowerUps = {};
+  G.timerSec = G.cfg.duration * 60;
+  G.scoreBlind = false;
+
+  document.getElementById('screen-lobby').classList.add('hidden');
+  document.getElementById('screen-game').classList.remove('hidden');
+
+  await initMap();
+  buildScoreBoard();
+  buildPowerUpBar();
+  startTimer();
+  startBots();
+  updateStatus('Verken het gebied — tik een hexagon aan om een missie te spelen');
+  toast(`Spel gestart! ${G.cfg.city} — ${G.cfg.duration} minuten`,'success');
+}
+
+// ════════════════════════════════════════════════════════
+// MAP + HEX GRID
+// ════════════════════════════════════════════════════════
+const CITY_COORDS = {
+  'rotterdam': [51.9225, 4.47917],
+  'amsterdam': [52.3676, 4.9041],
+  'den haag':  [52.0705, 4.3007],
+  'utrecht':   [52.0907, 5.1214],
+  'eindhoven': [51.4416, 5.4697],
+};
+
+async function initMap() {
+  const cityKey = G.cfg.city.toLowerCase().split(' ')[0];
+  let center = CITY_COORDS[cityKey] || CITY_COORDS['rotterdam'];
+
+  if (!G.map) {
+    G.map = L.map('map', { zoomControl:false, attributionControl:true, tap:false, preferCanvas:true })
+              .setView(center, 16);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom:20, attribution:'© OpenStreetMap', keepBuffer:4,
+    }).addTo(G.map);
+    G.map.on('click', onMapClick);
+  } else {
+    G.map.setView(center, 16);
+    if (G.hexLayer) { G.hexLayer.clearLayers(); G.hexLayer = null; }
+    if (G.playerMarker) { G.map.removeLayer(G.playerMarker); G.playerMarker = null; }
+    G.botIntervals.forEach(clearInterval); G.botIntervals = [];
+  }
+
+  G.centerLatLng = center;
+  G.simPos = [...center];
+  G.playerPos = { lat: center[0] + 0.0005, lng: center[1] - 0.0005 };
+
+  generateHexGrid(center, G.cfg.radius);
+  placePlayerMarker();
+  G.map.setView([G.playerPos.lat, G.playerPos.lng], 16);
+}
+
+function generateHexGrid(center, radiusM) {
+  G.hexes = new Map();
+  G.hexLayer = L.layerGroup().addTo(G.map);
+
+  const res = G.resolution;
+  const centerH3 = h3.latLngToCell(center[0], center[1], res);
+  const kRings = Math.ceil(radiusM / 120); // approx cells
+  const cells = h3.gridDisk(centerH3, kRings);
+
+  // filter to approximate circle
+  const playArea = [];
+  cells.forEach(idx => {
+    const [lat, lng] = h3.cellToLatLng(idx);
+    const dist = haversine(center[0], center[1], lat, lng);
+    if (dist <= radiusM) playArea.push(idx);
+  });
+
+  G.totalHexes = playArea.length;
+
+  // pick special hexes
+  const keyCount = Math.max(3, Math.floor(playArea.length / 12));
+  const shuffled = [...playArea].sort(() => Math.random() - .5);
+  const keyHexes = new Set(shuffled.slice(0, keyCount));
+
+  // central hex = closest to center
+  let centralIdx = playArea[0];
+  let minDist = Infinity;
+  playArea.forEach(idx => {
+    const [la, ln] = h3.cellToLatLng(idx);
+    const d = haversine(center[0], center[1], la, ln);
+    if (d < minDist) { minDist = d; centralIdx = idx; }
+  });
+
+  // calc point values (quadratic distance from center, closer = more)
+  playArea.forEach(idx => {
+    const [la, ln] = h3.cellToLatLng(idx);
+    const dist = haversine(center[0], center[1], la, ln);
+    const normalized = 1 - (dist / radiusM);
+    const pts = Math.round(50 + normalized * normalized * 200);
+
+    G.hexes.set(idx, {
+      idx, teamId: null, isCentral: idx === centralIdx,
+      isKey: keyHexes.has(idx) && idx !== centralIdx,
+      pointsValue: idx === centralIdx ? 500 : pts,
+      missionDone: false, locked: false, lockedUntil: 0,
+      wallTeam: null, wallUntil: 0,
+    });
+  });
+
+  drawAllHexes();
+  document.getElementById('s-total') && (document.getElementById('s-total').textContent = G.totalHexes);
+}
+
+function drawAllHexes() {
+  if (G.hexLayer) G.hexLayer.clearLayers();
+  G.hexes.forEach((hex, idx) => drawHex(idx));
+}
+
+function drawHex(idx) {
+  const hex = G.hexes.get(idx);
+  if (!hex) return;
+
+  const boundary = h3.cellToBoundary(idx);
+  const latlngs = boundary.map(([la,ln]) => [la,ln]);
+
+  let fillColor = 'transparent';
+  let fillOpacity = 0;
+  let color = 'rgba(57,255,110,0.18)';
+  let weight = 0.8;
+  let dashArray = null;
+
+  if (hex.isCentral) {
+    color = hex.teamId !== null ? getTeamColor(hex.teamId) : '#ffb800';
+    weight = 2.5;
+    fillColor = hex.teamId !== null ? getTeamColor(hex.teamId) : '#ffb800';
+    fillOpacity = hex.teamId !== null ? 0.35 : 0.08;
+    dashArray = hex.teamId !== null ? null : '4,4';
+  } else if (hex.isKey) {
+    color = hex.teamId !== null ? getTeamColor(hex.teamId) : 'rgba(57,255,110,0.55)';
+    weight = hex.teamId !== null ? 2 : 1.5;
+    fillColor = hex.teamId !== null ? getTeamColor(hex.teamId) : 'rgba(57,255,110,0.1)';
+    fillOpacity = hex.teamId !== null ? 0.3 : 0.12;
+    dashArray = hex.teamId !== null ? null : '2,3';
+  } else if (hex.teamId !== null) {
+    fillColor = getTeamColor(hex.teamId);
+    fillOpacity = 0.3;
+    color = getTeamColor(hex.teamId);
+    weight = 1.5;
+  }
+
+  const poly = L.polygon(latlngs, {
+    color, weight, fillColor, fillOpacity, dashArray, opacity: 0.85,
+  });
+
+  // tooltip
+  let tip = `${hex.pointsValue} pts`;
+  if (hex.isKey) tip = '🧩 ' + tip;
+  if (hex.isCentral) tip = '⚡ CENTRAAL — ' + tip;
+  if (hex.locked && Date.now() < hex.lockedUntil) tip += ' 🔒';
+  poly.bindTooltip(tip, { permanent:false, direction:'center', className:'leaflet-tooltip', opacity:.9 });
+
+  poly.on('click', () => onHexClick(idx));
+  poly.addTo(G.hexLayer);
+  hex._poly = poly;
+}
+
+function refreshHex(idx) {
+  const hex = G.hexes.get(idx);
+  if (!hex || !hex._poly) return;
+  G.hexLayer.removeLayer(hex._poly);
+  hex._poly = null;
+  drawHex(idx);
+}
+
+// ════════════════════════════════════════════════════════
+// PLAYER MARKER
+// ════════════════════════════════════════════════════════
+function placePlayerMarker() {
+  const pos = [G.playerPos.lat, G.playerPos.lng];
+  const color = getTeamColor(0);
+  const icon = L.divIcon({
+    className: '',
+    html: `<div style="width:16px;height:16px;border-radius:50%;background:${color};border:3px solid #fff;box-shadow:0 0 12px ${color}"></div>`,
+    iconSize: [16,16], iconAnchor: [8,8],
+  });
+  if (G.playerMarker) G.map.removeLayer(G.playerMarker);
+  G.playerMarker = L.marker(pos, { icon, zIndexOffset:1000 }).addTo(G.map);
+}
+
+// ════════════════════════════════════════════════════════
+// MAP CLICK — simulate movement
+// ════════════════════════════════════════════════════════
+function onMapClick(e) {
+  if (G.mission_modal_open) return;
+  G.playerPos = { lat: e.latlng.lat, lng: e.latlng.lng };
+  if (G.playerMarker) G.playerMarker.setLatLng([e.latlng.lat, e.latlng.lng]);
+  updateStatus('Positie bijgewerkt — tik een hexagon aan om te claimen');
+}
+
+// ════════════════════════════════════════════════════════
+// HEX CLICK — trigger mission
+// ════════════════════════════════════════════════════════
+function onHexClick(idx) {
+  if (!G.gameRunning) return;
+  const hex = G.hexes.get(idx);
+  if (!hex) return;
+
+  // check lock
+  if (hex.locked && Date.now() < hex.lockedUntil) {
+    const secs = Math.ceil((hex.lockedUntil - Date.now()) / 1000);
+    toast(`Hexagon vergrendeld — ${secs}s wachten`,'error');
+    return;
+  }
+
+  // if central — different flow
+  if (hex.isCentral) {
+    if (!G.centralUnlocked) { toast('Verzamel eerst genoeg fragmenten!','error'); return; }
+    openCentralChallenge(); return;
+  }
+
+  // already claimed by player team
+  if (hex.teamId === G.playerTeam && hex.missionDone) {
+    toast('Al geclaimd door jouw team!','amber'); return;
+  }
+
+  G.currentHex = idx;
+  openMission(hex);
+}
+
+// ════════════════════════════════════════════════════════
+// MISSION SYSTEM
+// ════════════════════════════════════════════════════════
+function pickMission(hex) {
+  const isSabotaged = G.activePowerUps[G.playerTeam]?.type === 'sabotage';
+  const types = ['multiple_choice','multiple_choice','estimation','consensus'];
+  const type = types[Math.floor(Math.random() * types.length)];
+  const bank = MISSION_BANK[type];
+  let pool = bank;
+  if (isSabotaged) pool = bank.filter(m => m.difficulty === 3);
+  if (!pool.length) pool = bank;
+  const m = pool[Math.floor(Math.random() * pool.length)];
+  return { ...m, type };
+}
+
+let missionTimerInterval = null;
+
+function openMission(hex) {
+  const mission = pickMission(hex);
+  G.currentMission = mission;
+  G.pendingAnswer = null;
+  G.mission_modal_open = true;
+
+  document.getElementById('mission-modal').classList.remove('hidden');
+  document.getElementById('mtype').textContent =
+    mission.type === 'multiple_choice' ? 'MEERKEUZE' :
+    mission.type === 'estimation' ? 'SCHATTING' : 'CONSENSUS';
+
+  const doubler = G.activePowerUps[G.playerTeam]?.type === 'double_points';
+  const pts = hex.pointsValue * (doubler ? 2 : 1) * G.streaks[G.playerTeam].multiplier;
+  document.getElementById('mpts').textContent = `+${Math.round(pts)} PTS${doubler?' ✖️':''}`;
+
+  document.getElementById('mquestion').textContent = mission.question;
+  const hintEl = document.getElementById('mhint');
+  if (mission.hint) { hintEl.textContent = '💡 ' + mission.hint; hintEl.style.display='block'; }
+  else hintEl.style.display = 'none';
+
+  document.getElementById('fun-fact').style.display = 'none';
+  document.getElementById('btn-submit-mission').style.display = 'none';
+
+  const area = document.getElementById('mission-answer-area');
+  area.innerHTML = '';
+
+  if (mission.type === 'multiple_choice') {
+    area.innerHTML = '<div class="options-grid" id="opts-grid"></div>';
+    const og = document.getElementById('opts-grid');
+    mission.options.forEach((opt, i) => {
+      const b = document.createElement('button');
+      b.className = 'opt-btn';
+      b.textContent = `${String.fromCharCode(65+i)}. ${opt}`;
+      b.onclick = () => {
+        document.querySelectorAll('.opt-btn').forEach(x => x.classList.remove('selected'));
+        b.classList.add('selected');
+        G.pendingAnswer = i;
+        document.getElementById('btn-submit-mission').style.display = 'block';
+      };
+      og.appendChild(b);
+    });
+  } else if (mission.type === 'estimation') {
+    area.innerHTML = `<div class="estimation-wrap"><input type="number" id="est-input" placeholder="Jouw schatting…"></div>`;
+    document.getElementById('btn-submit-mission').style.display = 'block';
+  } else if (mission.type === 'consensus') {
+    const members = ['Jij', 'Speler 2', 'Speler 3'];
+    area.innerHTML = '<div class="consensus-grid" id="cons-grid"></div>';
+    const cg = document.getElementById('cons-grid');
+    members.forEach((name, i) => {
+      cg.innerHTML += `<div class="member-vote">
+        <span class="member-name">${name}</span>
+        <div class="vote-btns">
+          <button class="vote-btn" onclick="castVote(${i},'JA',this)">JA</button>
+          <button class="vote-btn" onclick="castVote(${i},'NEE',this)">NEE</button>
+        </div>
+      </div>`;
+    });
+    window._votes = {};
+    document.getElementById('btn-submit-mission').style.display = 'block';
+  }
+
+  // timer
+  const timeLimit = mission.difficulty === 1 ? 30 : mission.difficulty === 2 ? 45 : 60;
+  G.missionTimeLeft = timeLimit;
+  const fill = document.getElementById('mtimer-fill');
+  fill.style.width = '100%';
+  fill.style.background = 'var(--g)';
+
+  if (missionTimerInterval) clearInterval(missionTimerInterval);
+  missionTimerInterval = setInterval(() => {
+    G.missionTimeLeft--;
+    const pct = (G.missionTimeLeft / timeLimit) * 100;
+    fill.style.width = pct + '%';
+    if (pct < 30) fill.style.background = 'var(--red)';
+    else if (pct < 60) fill.style.background = 'var(--amber)';
+    if (G.missionTimeLeft <= 0) { clearInterval(missionTimerInterval); autoFailMission(); }
+  }, 1000);
+}
+
+window.castVote = function(i, val, el) {
+  window._votes = window._votes || {};
+  window._votes[i] = val;
+  const row = el.closest('.member-vote');
+  row.querySelectorAll('.vote-btn').forEach(b => b.className = 'vote-btn');
+  el.className = `vote-btn voted-${val === 'JA' ? 'yes' : 'no'}`;
+  G.pendingAnswer = window._votes;
+};
+
+document.getElementById('btn-submit-mission').addEventListener('click', submitMission);
+
+function submitMission() {
+  if (missionTimerInterval) clearInterval(missionTimerInterval);
+  const mission = G.currentMission;
+  const hex = G.hexes.get(G.currentHex);
+  let correct = false;
+
+  if (mission.type === 'multiple_choice') {
+    if (G.pendingAnswer === null) { toast('Kies een antwoord','error'); return; }
+    correct = G.pendingAnswer === mission.correct;
+    document.querySelectorAll('.opt-btn').forEach((b, i) => {
+      if (i === mission.correct) b.classList.add('correct');
+      else if (i === G.pendingAnswer) b.classList.add('wrong');
+    });
+  } else if (mission.type === 'estimation') {
+    const val = parseFloat(document.getElementById('est-input').value);
+    if (isNaN(val)) { toast('Vul een getal in','error'); return; }
+    correct = Math.abs(val - mission.answer) <= mission.margin;
+    document.getElementById('est-input').style.borderColor = correct ? 'var(--g)' : 'var(--red)';
+    document.getElementById('est-input').insertAdjacentHTML('afterend', `<div style="font-size:11px;color:${correct?'var(--g)':'var(--red)'};margin-top:4px">${correct?'✓ Correct!':'✗ Antwoord: '+mission.answer}</div>`);
+  } else if (mission.type === 'consensus') {
+    const votes = Object.values(window._votes || {});
+    const yea = votes.filter(v => v === 'JA').length;
+    correct = yea > votes.length / 2;
+  }
+
+  // show fun fact
+  document.getElementById('fun-fact').textContent = '💡 ' + mission.fun_fact;
+  document.getElementById('fun-fact').style.display = 'block';
+  document.getElementById('btn-submit-mission').style.display = 'none';
+
+  if (correct) {
+    applyCorrectAnswer(hex);
+    setTimeout(closeMission, 1800);
+  } else {
+    applyWrongAnswer(hex, mission.difficulty);
+    setTimeout(closeMission, 2000);
+  }
+}
+
+function autoFailMission() {
+  const hex = G.hexes.get(G.currentHex);
+  applyWrongAnswer(hex, G.currentMission?.difficulty || 1);
+  setTimeout(closeMission, 500);
+}
+
+function applyCorrectAnswer(hex) {
+  const streakSaver = G.activePowerUps[G.playerTeam]?.type === 'streak_saver';
+  const doubler = G.activePowerUps[G.playerTeam]?.type === 'double_points';
+
+  // streak
+  G.streaks[G.playerTeam].current++;
+  if (G.streaks[G.playerTeam].current > G.streaks[G.playerTeam].max)
+    G.streaks[G.playerTeam].max = G.streaks[G.playerTeam].current;
+  const streak = G.streaks[G.playerTeam].current;
+  const mult = streak >= 7 ? 2 : streak >= 5 ? 1.5 : streak >= 3 ? 1.25 : 1;
+  G.streaks[G.playerTeam].multiplier = mult;
+
+  // points
+  const pts = Math.round(hex.pointsValue * mult * (doubler ? 2 : 1));
+  G.teams[G.playerTeam].score += pts;
+  G.teams[G.playerTeam].claims++;
+
+  // hex update
+  hex.teamId = G.playerTeam;
+  hex.missionDone = true;
+  G.hexes.set(G.currentHex, hex);
+
+  // consume double_points
+  if (doubler) delete G.activePowerUps[G.playerTeam];
+
+  // key hex → hint fragment
+  if (hex.isKey) {
+    const fragIdx = G.hints.filter(h => h.teamId === G.playerTeam).length;
+    G.hints.push({ teamId: G.playerTeam, fragmentIndex: fragIdx });
+    logEvent('hint_unlocked', G.playerTeam, { idx: G.currentHex, fragIdx });
+    toast(`🧩 Hint-fragment ${fragIdx+1} ontgrendeld!`,'amber');
+    document.getElementById('hint-count').textContent = G.hints.filter(h=>h.teamId===G.playerTeam).length;
+    checkCentralUnlock();
+  }
+
+  logEvent('area_claimed', G.playerTeam, { idx: G.currentHex, pts });
+  toast(`✓ Geclaimd! +${pts} punten${mult>1?' (×'+mult+')':''}`, 'success');
+  updateStreakDisplay();
+  buildScoreBoard();
+  refreshHex(G.currentHex);
+
+  // earn power-up on streak milestones
+  if (streak > 0 && streak % 5 === 0) earnPowerUp(G.playerTeam);
+}
+
+function applyWrongAnswer(hex, difficulty) {
+  const saver = G.activePowerUps[G.playerTeam]?.type === 'streak_saver';
+  if (!saver) {
+    G.streaks[G.playerTeam].current = 0;
+    G.streaks[G.playerTeam].multiplier = 1;
+  } else {
+    delete G.activePowerUps[G.playerTeam];
+    toast('🔥 Streak Saver gebruikt!','amber');
+  }
+
+  // lock hex
+  const lockSec = difficulty === 1 ? 15 : difficulty === 2 ? 30 : 60;
+  hex.locked = true;
+  hex.lockedUntil = Date.now() + lockSec * 1000;
+  G.hexes.set(G.currentHex, hex);
+
+  logEvent('field_locked', G.playerTeam, { idx: G.currentHex, lockSec });
+  toast(`✗ Fout — hexagon vergrendeld voor ${lockSec}s`,'error');
+  updateStreakDisplay();
+  refreshHex(G.currentHex);
+}
+
+function closeMission() {
+  document.getElementById('mission-modal').classList.add('hidden');
+  G.mission_modal_open = false;
+  G.currentMission = null;
+  G.currentHex = null;
+  if (missionTimerInterval) clearInterval(missionTimerInterval);
+}
+
+// ════════════════════════════════════════════════════════
+// CENTRAL CHALLENGE
+// ════════════════════════════════════════════════════════
+function checkCentralUnlock() {
+  const myHints = G.hints.filter(h => h.teamId === G.playerTeam).length;
+  const myClaims = G.teams[G.playerTeam]?.claims || 0;
+  const needed = Math.max(3, Math.floor(G.totalHexes / 10));
+  if (myHints >= 3 && myClaims >= 5 && !G.centralUnlocked) {
+    G.centralUnlocked = true;
+    document.getElementById('btn-central').style.display = 'block';
+    toast('⚡ Centrale uitdaging ontgrendeld!','amber');
+    logEvent('challenge_unlocked', G.playerTeam, {});
+  }
+  updateHintPanel();
+}
+
+function openCentralChallenge() {
+  G.centralLayer = 0;
+  renderCentralLayer();
+  document.getElementById('central-modal').classList.remove('hidden');
+}
+
+function renderCentralLayer() {
+  const l = G.centralLayer;
+  ['ldot0','ldot1','ldot2'].forEach((id,i) => {
+    const el = document.getElementById(id);
+    el.className = 'layer-dot' + (i < l ? ' done' : i === l ? ' active' : '');
+  });
+
+  const content = document.getElementById('central-content');
+
+  if (l === 0) {
+    document.getElementById('central-sub').textContent = 'LAAG 1 — HINT PUZZEL';
+    const frags = G.hints.filter(h=>h.teamId===G.playerTeam);
+    content.innerHTML = `
+      <div style="font-size:11px;color:var(--dim);margin-bottom:12px">Jij hebt ${frags.length} van de ${Math.max(5,frags.length+2)} fragmenten verzameld. Wat toont de historische afbeelding van de centrale locatie?</div>
+      <div class="options-grid">
+        <button class="opt-btn" onclick="selectCentralOpt(this,0)">A. Een historische fabriek</button>
+        <button class="opt-btn" onclick="selectCentralOpt(this,1)">B. De oorspronkelijke haven</button>
+        <button class="opt-btn" onclick="selectCentralOpt(this,2)">C. Het stadhuis uit 1600</button>
+        <button class="opt-btn" onclick="selectCentralOpt(this,3)">D. De eerste markthal</button>
+      </div>`;
+    G.centralAnswers[0] = null;
+  } else if (l === 1) {
+    document.getElementById('central-sub').textContent = 'LAAG 2 — META QUIZ';
+    const ev = G.events;
+    const claims = ev.filter(e=>e.type==='area_claimed');
+    const myTeamName = G.teams[G.playerTeam].name;
+    const firstClaimer = G.teams[claims[0]?.teamId]?.name || myTeamName;
+    content.innerHTML = `
+      <div style="font-size:11px;color:var(--dim);margin-bottom:12px">Vragen over het verloop van dit spel:</div>
+      <div style="font-size:13px;color:var(--text);margin-bottom:12px">Welk team claimde als eerste een hexagon in dit spel?</div>
+      <div class="options-grid">
+        ${G.teams.map((t,i)=>`<button class="opt-btn" onclick="selectCentralOpt(this,${i})">${t.name}</button>`).join('')}
+      </div>`;
+    G.centralAnswers[1] = null;
+  } else if (l === 2) {
+    document.getElementById('central-sub').textContent = 'LAAG 3 — FINALESLAG';
+    content.innerHTML = `
+      <div style="font-family:var(--head);font-size:12px;color:var(--amber);margin-bottom:8px">⚡ TIJDGEBONDEN EINDVRAAG — 30 SECONDEN</div>
+      <div style="font-size:13px;color:var(--text);margin-bottom:14px">Rotterdam heeft de grootste haven van Europa. In welk jaar werd Rotterdam officieel de grootste haven ter wereld qua tonnage?</div>
+      <div class="estimation-wrap"><input type="number" id="final-ans" placeholder="Jaar…" style="font-size:18px"></div>
+      <div style="font-family:var(--head);font-size:20px;color:var(--red);text-align:center;margin-top:8px" id="final-timer">30</div>`;
+    G.centralAnswers[2] = null;
+    // start final timer
+    let t = 30;
+    const fi = setInterval(() => {
+      t--;
+      const el = document.getElementById('final-timer');
+      if (el) el.textContent = t;
+      if (t <= 0) { clearInterval(fi); submitCentral(); }
+    }, 1000);
+    G._finalTimerInterval = fi;
+  }
+}
+
+window.selectCentralOpt = function(el, val) {
+  el.closest('.options-grid').querySelectorAll('.opt-btn').forEach(b=>b.classList.remove('selected'));
+  el.classList.add('selected');
+  G.centralAnswers[G.centralLayer] = val;
+};
+
+document.getElementById('btn-central-submit').addEventListener('click', submitCentral);
+document.getElementById('btn-central-close').addEventListener('click', () => {
+  document.getElementById('central-modal').classList.add('hidden');
+  if (G._finalTimerInterval) clearInterval(G._finalTimerInterval);
+});
+
+function submitCentral() {
+  if (G._finalTimerInterval) clearInterval(G._finalTimerInterval);
+  const l = G.centralLayer;
+
+  if (l === 2) {
+    // finale
+    const val = parseInt(document.getElementById('final-ans')?.value);
+    const correct = !isNaN(val) && Math.abs(val - 1962) <= 5;
+    document.getElementById('central-modal').classList.add('hidden');
+    if (correct || true /* demo: always win */) {
+      claimCentralHex();
+    }
+    return;
+  }
+
+  G.centralLayer++;
+  if (G.centralLayer >= 3) {
+    document.getElementById('central-modal').classList.add('hidden');
+    claimCentralHex();
+  } else {
+    renderCentralLayer();
+  }
+}
+
+function claimCentralHex() {
+  if (G.centralDone) { toast('Centrale al geclaimd!','error'); return; }
+  G.centralDone = true;
+
+  // find central hex
+  G.hexes.forEach((hex, idx) => {
+    if (hex.isCentral) {
+      hex.teamId = G.playerTeam;
+      hex.missionDone = true;
+      G.hexes.set(idx, hex);
+      refreshHex(idx);
+    }
+  });
+
+  G.teams[G.playerTeam].score += 500;
+  logEvent('challenge_completed', G.playerTeam, { bonus: 500 });
+  buildScoreBoard();
+  toast('⚡ CENTRAAL HEXAGON GECLAIMD! +500 PTS','amber');
+  flashScreen();
+}
+
+// ════════════════════════════════════════════════════════
+// HINTS PANEL
+// ════════════════════════════════════════════════════════
+document.getElementById('btn-hints').addEventListener('click', () => {
+  updateHintPanel();
+  document.getElementById('hint-panel').classList.toggle('show');
+});
+
+function updateHintPanel() {
+  const myHints = G.hints.filter(h=>h.teamId===G.playerTeam);
+  const total = Math.max(5, myHints.length + 3);
+  const grid = document.getElementById('hint-grid');
+  grid.innerHTML = '';
+
+  const emojis = ['🏛️','🌉','⚓','🗺️','🏗️','🔭','⚡','🌊','🗼','🎭'];
+  for (let i = 0; i < 9; i++) {
+    const unlocked = i < myHints.length;
+    grid.innerHTML += `<div class="hint-frag ${unlocked?'unlocked':'locked'}">
+      ${unlocked ? emojis[i % emojis.length] : '?'}
+      <span class="frag-label">${i+1}</span>
+    </div>`;
+  }
+
+  document.getElementById('hint-progress').textContent =
+    `${myHints.length} fragmenten verzameld — ${Math.max(0,3-myHints.length)} nog nodig`;
+
+  const canStart = myHints.length >= 3 && G.teams[G.playerTeam].claims >= 5;
+  document.getElementById('btn-start-central').style.display = canStart ? 'block' : 'none';
+}
+
+document.getElementById('btn-start-central').addEventListener('click', () => {
+  document.getElementById('hint-panel').classList.remove('show');
+  openCentralChallenge();
+});
+
+// ════════════════════════════════════════════════════════
+// POWER-UPS
+// ════════════════════════════════════════════════════════
+document.getElementById('btn-claim').addEventListener('click', () => {
+  // simulate walking to nearest unclaimed hex
+  let nearest = null, minD = Infinity;
+  G.hexes.forEach((hex, idx) => {
+    if (hex.teamId !== null) return;
+    const [la,ln] = h3.cellToLatLng(idx);
+    const d = haversine(G.playerPos.lat, G.playerPos.lng, la, ln);
+    if (d < minD) { minD = d; nearest = idx; }
+  });
+  if (nearest) {
+    G.currentHex = nearest;
+    onHexClick(nearest);
+  }
+});
+
+function buildPowerUpBar() {
+  const bar = document.getElementById('powerup-bar');
+  bar.innerHTML = '';
+  const myPUs = G.teams[G.playerTeam]?.powerUps || [];
+  const usedTypes = Object.keys(G.activePowerUps);
+
+  const btn = document.createElement('button');
+  btn.className = 'pu-btn';
+  btn.innerHTML = `⚡ POWER-UPS <span class="pu-count">${myPUs.length}</span>`;
+  btn.onclick = openPUModal;
+  btn.disabled = myPUs.length === 0;
+  bar.appendChild(btn);
+}
+
+function openPUModal() {
+  const myPUs = G.teams[G.playerTeam]?.powerUps || [];
+  const grid = document.getElementById('pu-grid');
+  grid.innerHTML = '';
+  myPUs.forEach((pu,i) => {
+    const card = document.createElement('div');
+    card.className = 'pu-card';
+    card.innerHTML = `<div class="pu-icon">${pu.icon}</div><div class="pu-name">${pu.name}</div><div class="pu-desc">${pu.desc}</div>`;
+    card.onclick = () => usePowerUp(pu, i);
+    grid.appendChild(card);
+  });
+  if (!myPUs.length) grid.innerHTML = '<div style="font-size:11px;color:var(--dim);grid-column:span 2;text-align:center;padding:16px">Geen power-ups beschikbaar — verdien ze via streaks!</div>';
+  document.getElementById('pu-modal').classList.remove('hidden');
+}
+
+window.closePUModal = function() {
+  document.getElementById('pu-modal').classList.add('hidden');
+};
+
+function usePowerUp(pu, idx) {
+  closePUModal();
+  G.activePowerUps[G.playerTeam] = { type: pu.type, activatedAt: Date.now() };
+  G.teams[G.playerTeam].powerUps.splice(idx, 1);
+  logEvent('power_up_used', G.playerTeam, { type: pu.type });
+  toast(`${pu.icon} ${pu.name} geactiveerd!`, 'purple');
+  buildPowerUpBar();
+
+  // special effects
+  if (pu.type === 'score_peek') {
+    G.scoreBlind = false;
+    buildScoreBoard();
+    setTimeout(() => { buildScoreBoard(); }, 60000);
+  }
+  if (pu.type === 'scanner') {
+    toast('📡 Sleutelhexagons zichtbaar voor 30s','amber');
+  }
+}
+
+function earnPowerUp(teamId) {
+  const available = POWER_UP_DEFS.filter(p => !G.teams[teamId].powerUps.find(x=>x.type===p.type));
+  if (!available.length) return;
+  const pu = available[Math.floor(Math.random() * available.length)];
+  G.teams[teamId].powerUps.push(pu);
+  if (teamId === G.playerTeam) {
+    toast(`🎁 Power-up verdiend: ${pu.icon} ${pu.name}`,'purple');
+    buildPowerUpBar();
+  }
+}
+
+// ════════════════════════════════════════════════════════
+// SCORE BOARD
+// ════════════════════════════════════════════════════════
+function buildScoreBoard() {
+  const sb = document.getElementById('score-board');
+  const sorted = [...G.teams].sort((a,b) => b.score - a.score);
+  sb.innerHTML = sorted.map(t => {
+    const isBlind = G.scoreBlind && t.id !== G.playerTeam;
+    return `<div class="score-row">
+      <div class="score-dot" style="background:${t.color}"></div>
+      <span class="score-name">${t.name}</span>
+      <span class="${isBlind?'score-blind':'score-val'}">${isBlind ? '????' : t.score}</span>
+    </div>`;
+  }).join('');
+}
+
+// ════════════════════════════════════════════════════════
+// TIMER
+// ════════════════════════════════════════════════════════
+function startTimer() {
+  G.gameRunning = true;
+  if (G.timerInterval) clearInterval(G.timerInterval);
+  G.timerInterval = setInterval(() => {
+    G.timerSec--;
+    updateTimerDisplay();
+
+    // score blind activation
+    if (G.timerSec === G.cfg.blind * 60) {
+      G.scoreBlind = true;
+      buildScoreBoard();
+      toast(`Score-blindheid actief — nog ${G.cfg.blind} minuten!`,'amber');
+    }
+
+    // earn power-up at halfway
+    if (G.timerSec === Math.floor(G.cfg.duration * 30)) earnPowerUp(G.playerTeam);
+
+    if (G.timerSec <= 0) { clearInterval(G.timerInterval); endGame(); }
+  }, 1000);
+}
+
+function updateTimerDisplay() {
+  const m = Math.floor(G.timerSec / 60);
+  const s = G.timerSec % 60;
+  const el = document.getElementById('timer-display');
+  el.textContent = `${m}:${String(s).padStart(2,'0')}`;
+  const box = document.getElementById('timer-box');
+  box.className = G.timerSec < 300 ? 'timer-box urgent' : 'timer-box';
+}
+
+// ════════════════════════════════════════════════════════
+// BOT AI — simple simulation
+// ════════════════════════════════════════════════════════
+function startBots() {
+  G.botIntervals.forEach(clearInterval);
+  G.botIntervals = [];
+
+  G.teams.filter(t=>t.isBot).forEach(team => {
+    // bots claim a random hex every 8-15 seconds
+    const iv = setInterval(() => {
+      if (!G.gameRunning) return;
+      const unclaimed = [...G.hexes.entries()].filter(([,h])=>!h.isCentral && h.teamId === null && !h.locked);
+      if (!unclaimed.length) return;
+      const [idx, hex] = unclaimed[Math.floor(Math.random() * Math.min(unclaimed.length, 20))];
+
+      // 80% chance to succeed
+      if (Math.random() < 0.8) {
+        hex.teamId = team.id;
+        hex.missionDone = true;
+        const pts = hex.pointsValue;
+        team.score += pts;
+        team.claims++;
+        G.hexes.set(idx, hex);
+        refreshHex(idx);
+        logEvent('area_claimed', team.id, { idx, pts });
+        buildScoreBoard();
+        if (hex.isKey) {
+          const fi = G.hints.filter(h=>h.teamId===team.id).length;
+          G.hints.push({ teamId: team.id, fragmentIndex: fi });
+          logEvent('hint_unlocked', team.id, { idx, fi });
+        }
+        // earn powerup
+        if (team.claims % 5 === 0) earnPowerUp(team.id);
+      } else {
+        hex.locked = true;
+        hex.lockedUntil = Date.now() + 20000;
+        G.hexes.set(idx, hex);
+        refreshHex(idx);
+        logEvent('field_locked', team.id, { idx });
+      }
+    }, 8000 + Math.random() * 7000);
+    G.botIntervals.push(iv);
+  });
+}
+
+// ════════════════════════════════════════════════════════
+// STREAK DISPLAY
+// ════════════════════════════════════════════════════════
+function updateStreakDisplay() {
+  const s = G.streaks[G.playerTeam];
+  const el = document.getElementById('streak-display');
+  const cnt = document.getElementById('streak-count');
+  if (s.current >= 2) {
+    el.classList.remove('hidden');
+    cnt.textContent = s.current;
+  } else {
+    el.classList.add('hidden');
+  }
+}
+
+// ════════════════════════════════════════════════════════
+// END GAME + RESULTS
+// ════════════════════════════════════════════════════════
+function endGame() {
+  G.gameRunning = false;
+  G.botIntervals.forEach(clearInterval);
+  closeMission();
+  document.getElementById('central-modal').classList.add('hidden');
+
+  setTimeout(() => {
+    showResults();
+  }, 800);
+}
+
+function showResults() {
+  document.getElementById('screen-game').classList.add('hidden');
+  document.getElementById('screen-results').classList.remove('hidden');
+
+  const sorted = [...G.teams].sort((a,b) => b.score - a.score);
+  document.getElementById('result-city').textContent = G.cfg.city.toUpperCase() + ' — EINDUITSLAG';
+
+  // podium
+  const podium = document.getElementById('podium');
+  const podiumOrder = sorted.length >= 3 ? [sorted[1], sorted[0], sorted[2]] : sorted;
+  const heights = [80, 120, 60];
+  podium.innerHTML = podiumOrder.map((t,i) => {
+    const rank = sorted.indexOf(t) + 1;
+    return `<div class="podium-slot">
+      <div class="podium-rank">${rank === 1 ? '🏆' : rank === 2 ? '🥈' : '🥉'}</div>
+      <div class="podium-name" style="color:${t.color}">${t.name}</div>
+      <div class="podium-score" style="color:${t.color}">${t.score}</div>
+      <div class="podium-bar" style="height:${heights[i]}px;border-color:${t.color};background:${t.color}22"></div>
+    </div>`;
+  }).join('');
+
+  // list
+  const list = document.getElementById('results-list');
+  list.innerHTML = sorted.map((t,i) => {
+    const myHints = G.hints.filter(h=>h.teamId===t.id).length;
+    return `<div class="result-row">
+      <div class="result-rank">#${i+1}</div>
+      <div class="score-dot" style="background:${t.color};width:10px;height:10px;border-radius:50%;flex-shrink:0"></div>
+      <div class="result-name">${t.name}${t.id===G.playerTeam?' (JIJ)':''}</div>
+      <div class="result-stats">
+        <div class="result-pts" style="color:${t.color}">${t.score} pts</div>
+        <div class="result-detail">${t.claims} claims · ${myHints} fragmenten · streak ${G.streaks[t.id]?.max||0}×</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ════════════════════════════════════════════════════════
+// EVENT LOG
+// ════════════════════════════════════════════════════════
+function logEvent(type, teamId, payload) {
+  G.events.push({ type, teamId, payload, ts: Date.now() });
+}
+
+// ════════════════════════════════════════════════════════
+// UTILS
+// ════════════════════════════════════════════════════════
+function getTeamColor(id) {
+  return G.teams.find(t=>t.id===id)?.color || '#fff';
+}
+
+function haversine(la1, lo1, la2, lo2) {
+  const R = 6371000;
+  const dLat = (la2-la1)*Math.PI/180, dLon = (lo2-lo1)*Math.PI/180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(la1*Math.PI/180)*Math.cos(la2*Math.PI/180)*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function toast(msg, type='success') {
+  const c = document.getElementById('toast-container');
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  c.appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+
+function flashScreen() {
+  const el = document.getElementById('fog-flash');
+  el.classList.add('flash');
+  setTimeout(() => el.classList.remove('flash'), 400);
+}
+
+function updateStatus(msg) {
+  document.getElementById('status-bar').textContent = msg;
+}
+
+document.getElementById('btn-central').addEventListener('click', openCentralChallenge);
+
+// ════════════════════════════════════════════════════════
+// BOOT
+// ════════════════════════════════════════════════════════
+buildLobby();
+</script>
+</body>
+</html>
