@@ -250,7 +250,7 @@
     <div class="panel">
       <div class="panel-title">// SESSIE INSTELLINGEN</div>
       <div class="field"><label>LOCATIE (STAD / GEBIED)</label>
-        <input type="text" id="cfg-city" value="Rotterdam Centrum" placeholder="bijv. Amsterdam Jordaan">
+        <input type="text" id="cfg-city" value="Amsterdam Jordaan" placeholder="bijv. Amsterdam Jordaan">
       </div>
       <div class="field"><label>SPELDUUR (MINUTEN)</label>
         <select id="cfg-duration">
@@ -588,11 +588,30 @@ async function initMap() {
 
   G.centerLatLng = center;
   G.simPos = [...center];
-  G.playerPos = { lat: center[0] + 0.0005, lng: center[1] - 0.0005 };
 
-  generateHexGrid(center, G.cfg.radius);
+  // Start player at ~80% of radius along a random angle (edge of play area)
+  const startAngle = Math.random() * 2 * Math.PI;
+  const startDist  = G.cfg.radius * 0.80;
+  const startLat   = center[0] + (startDist / 111320) * Math.cos(startAngle);
+  const startLng   = center[1] + (startDist / (111320 * Math.cos(center[0] * Math.PI / 180))) * Math.sin(startAngle);
+  G.playerPos = { lat: startLat, lng: startLng };
+
+  try {
+    generateHexGrid(center, G.cfg.radius);
+    updateStatus(`✓ ${G.hexes.size} hexagons aangemaakt — fog wordt onthuld…`);
+  } catch(e) {
+    updateStatus('❌ Hex-generatie mislukt: ' + e.message);
+    console.error('generateHexGrid error:', e);
+  }
   placePlayerMarker();
   G.map.setView([G.playerPos.lat, G.playerPos.lng], 16);
+  try {
+    const revealed = updateFogOfWar(G.playerPos.lat, G.playerPos.lng);
+    updateStatus(`✓ ${G.hexes.size} hexagons — ${revealed} onthuld in startgebied`);
+  } catch(e) {
+    updateStatus('❌ Fog-reveal mislukt: ' + e.message);
+    console.error('updateFogOfWar error:', e);
+  }
 }
 
 function generateHexGrid(center, radiusM) {
@@ -641,6 +660,7 @@ function generateHexGrid(center, radiusM) {
       pointsValue: idx === centralIdx ? 500 : pts,
       missionDone: false, locked: false, lockedUntil: 0,
       wallTeam: null, wallUntil: 0,
+      visible: false,   // fog of war — revealed when player walks nearby
     });
   });
 
@@ -660,10 +680,21 @@ function drawHex(idx) {
   const boundary = h3.cellToBoundary(idx);
   const latlngs = boundary.map(([la,ln]) => [la,ln]);
 
-  let fillColor = 'transparent';
-  let fillOpacity = 0;
-  let color = 'rgba(57,255,110,0.18)';
-  let weight = 0.8;
+  // ── FOG OF WAR — hide unrevealed hexes ──────────────
+  if (!hex.visible) {
+    const poly = L.polygon(latlngs, {
+      color: 'rgba(57,255,110,0.22)', weight: 1,
+      fillColor: '#030a03', fillOpacity: 0.82,
+    });
+    poly.addTo(G.hexLayer);
+    hex._poly = poly;
+    return;
+  }
+
+  let fillColor = 'rgba(57,255,110,0.18)';
+  let fillOpacity = 1;
+  let color = '#39ff6e';
+  let weight = 2;
   let dashArray = null;
 
   if (hex.isCentral) {
@@ -725,12 +756,35 @@ function placePlayerMarker() {
 }
 
 // ════════════════════════════════════════════════════════
+// FOG OF WAR — reveal hexes near player
+// ════════════════════════════════════════════════════════
+function updateFogOfWar(lat, lng) {
+  if (G.hexes.size === 0) return 0;
+  const REVEAL_M = Math.max(250, G.cfg.radius * 0.55);
+  let revealed = 0;
+
+  G.hexes.forEach((hex, idx) => {
+    if (hex.visible) return;
+    const [hLat, hLng] = h3.cellToLatLng(idx);
+    if (haversine(lat, lng, hLat, hLng) <= REVEAL_M) {
+      hex.visible = true;
+      G.hexes.set(idx, hex);
+      if (hex._poly) { G.hexLayer.removeLayer(hex._poly); hex._poly = null; }
+      drawHex(idx);
+      revealed++;
+    }
+  });
+  return revealed;
+}
+
+// ════════════════════════════════════════════════════════
 // MAP CLICK — simulate movement
 // ════════════════════════════════════════════════════════
 function onMapClick(e) {
   if (G.mission_modal_open) return;
   G.playerPos = { lat: e.latlng.lat, lng: e.latlng.lng };
   if (G.playerMarker) G.playerMarker.setLatLng([e.latlng.lat, e.latlng.lng]);
+  updateFogOfWar(e.latlng.lat, e.latlng.lng);
   updateStatus('Positie bijgewerkt — tik een hexagon aan om te claimen');
 }
 
@@ -956,6 +1010,9 @@ function applyCorrectAnswer(hex) {
   updateStreakDisplay();
   buildScoreBoard();
   refreshHex(G.currentHex);
+  // claiming a hex reveals its neighbours too
+  const [clLat, clLng] = h3.cellToLatLng(G.currentHex);
+  updateFogOfWar(clLat, clLng);
 
   // earn power-up on streak milestones
   if (streak > 0 && streak % 5 === 0) earnPowerUp(G.playerTeam);
